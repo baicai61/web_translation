@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #f4f6f9;
+  color: #1a2332;
+}
+
+.segment-block {
+  border-left: 3px solid transparent;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.segment-block:hover {
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.segment-block.is-active {
+  background: rgba(37, 99, 235, 0.1);
+  border-left-color: #2563eb;
+}
+
+mark.search-highlight {
+  background: rgba(250, 204, 21, 0.55);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.pane-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}

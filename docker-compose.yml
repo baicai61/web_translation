@@ -1,0 +1,13 @@
+# 开源翻译引擎 LibreTranslate（MIT/AGPL，基于 Argos Translate）
+# 启动: docker compose up -d
+# 首次启动会下载 en↔zh 语言模型，可能需要几分钟
+services:
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: fanyi-libretranslate
+    ports:
+      - '5000:5000'
+    environment:
+      - LT_LOAD_ONLY=en,zh
+      - LT_DISABLE_WEB_UI=false
+    restart: unless-stopped
