@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Translation HTTP server (LibreTranslate-compatible API).
 Local: CTranslate2 (no PyTorch). Online fallback: MyMemory.

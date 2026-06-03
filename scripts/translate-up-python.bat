@@ -1,5 +1,8 @@
 @echo off
 cd /d "%~dp0.."
+chcp 65001 >nul 2>nul
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 
 echo ========================================
 echo  Local Translation Engine (CTranslate2)
@@ -29,13 +32,17 @@ if not defined PY_EXE (
 )
 
 echo Using: %PY_EXE%
-%PY_EXE% -c "import sys; print(sys.version)"
+%PY_EXE% -X utf8 -c "import sys; print(sys.version)"
+echo.
+
+echo [0/2] Check script encoding...
+%PY_EXE% -X utf8 scripts\fix_encoding.py
 echo.
 
 echo [1/2] Check local models (first run downloads ~140MB, then seconds only)...
 echo NOTE: Close any OLD engine window on port 5000 before starting.
 echo.
-%PY_EXE% scripts\install_local_translate.py
+%PY_EXE% -X utf8 scripts\install_local_translate.py
 if errorlevel 1 (
   echo.
   echo WARN: Local pack not fully installed; online fallback may be used.
@@ -52,5 +59,5 @@ echo Wait for [READY], then set web mode to LOCAL and press F5.
 echo Local mode: English ^<-^> Chinese offline.
 echo DO NOT CLOSE this window.
 echo.
-%PY_EXE% scripts\lt_server.py
+%PY_EXE% -X utf8 scripts\lt_server.py
 pause

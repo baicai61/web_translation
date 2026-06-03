@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Install CTranslate2 local en<->zh models (no PyTorch / no Argos)."""
 from __future__ import annotations
 

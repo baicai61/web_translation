@@ -1,0 +1,4 @@
+*.py text eol=lf encoding=utf-8
+*.bat text eol=crlf
+*.md text eol=lf
+*.json text eol=lf

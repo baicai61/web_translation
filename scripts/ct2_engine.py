@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Lightweight local en<->zh translation via CTranslate2 (no PyTorch)."""
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Configure MyMemory contact email for higher daily quota."""
 from __future__ import annotations
 
