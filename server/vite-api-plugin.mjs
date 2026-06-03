@@ -1,4 +1,4 @@
-import { handleApiRequest } from './api-core.mjs'
+import { friendlyTranslateError, handleApiRequest } from './api-core.mjs'
 
 export function viteApiPlugin() {
   return {
@@ -27,7 +27,7 @@ export function viteApiPlugin() {
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           res.end(
             JSON.stringify({
-              error: e instanceof Error ? e.message : '服务器错误',
+              error: e instanceof Error ? friendlyTranslateError(e.message) : '服务器错误',
             }),
           )
         }

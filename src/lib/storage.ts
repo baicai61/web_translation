@@ -50,3 +50,21 @@ export function loadLangPair(): LangPair {
 export function saveLangPair(from: string, to: string): void {
   localStorage.setItem(LANG_PAIR_KEY, JSON.stringify({ from, to }))
 }
+
+const ENGINE_MODE_KEY = 'fanyi-engine-mode'
+
+export type EngineMode = 'auto' | 'local' | 'online'
+
+export function loadEngineMode(): EngineMode {
+  try {
+    const raw = localStorage.getItem(ENGINE_MODE_KEY)
+    if (raw === 'auto' || raw === 'local' || raw === 'online') return raw
+  } catch {
+    /* ignore */
+  }
+  return 'auto'
+}
+
+export function saveEngineMode(mode: EngineMode): void {
+  localStorage.setItem(ENGINE_MODE_KEY, mode)
+}

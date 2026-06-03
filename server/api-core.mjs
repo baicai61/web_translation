@@ -1,9 +1,83 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 export const LT_URL = (process.env.LIBRETRANSLATE_URL || 'http://127.0.0.1:5000').replace(
   /\/$/,
   '',
 )
-const BATCH_SIZE = 20
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const MODE_FILE = path.join(__dirname, '.engine-mode.json')
+const BATCH_SIZE = 8
 let resolvedLtUrl = LT_URL
+
+function loadStoredEngineMode() {
+  try {
+    const data = JSON.parse(fs.readFileSync(MODE_FILE, 'utf8'))
+    if (['auto', 'local', 'online'].includes(data.mode)) return data.mode
+  } catch {
+    /* ignore */
+  }
+  return 'auto'
+}
+
+let userEngineMode = loadStoredEngineMode()
+
+function saveStoredEngineMode(mode) {
+  userEngineMode = mode
+  fs.writeFileSync(MODE_FILE, JSON.stringify({ mode }), 'utf8')
+}
+
+function resolveEngineForMode(mode, engineRaw, localAvailable) {
+  if (mode === 'online') return 'mymemory-online'
+  if (mode === 'local') {
+    return localAvailable ? 'ctranslate2-local' : 'ctranslate2-local-unavailable'
+  }
+  if (localAvailable && String(engineRaw).includes('ctranslate2')) {
+    return 'ctranslate2-local'
+  }
+  return 'mymemory-online'
+}
+
+function buildModePayload(engineRaw, localAvailable, engineSync, mymemoryEmailConfigured = false) {
+  return {
+    status: 'ok',
+    engine: resolveEngineForMode(userEngineMode, engineRaw, localAvailable),
+    mode: userEngineMode,
+    localAvailable,
+    engineSync,
+    mymemoryEmailConfigured,
+  }
+}
+
+/** 将引擎返回的英文错误转为中文（兼容旧版 lt_server） */
+export function friendlyTranslateError(message) {
+  const msg = String(message ?? '')
+  if (/[\u4e00-\u9fff]/.test(msg)) return msg
+
+  const lower = msg.toLowerCase()
+  if (
+    lower.includes('too many requests') ||
+    lower.includes('429') ||
+    lower.includes('quota') ||
+    lower.includes('free translations') ||
+    lower.includes('network error')
+  ) {
+    return (
+      '在线翻译请求过于频繁，或今日免费额度已用完。' +
+      '请改用「翻译当前字段」逐段翻译，或双击「启动翻译引擎.bat」启用本地离线引擎。' +
+      '也可运行「配置MyMemory邮箱.bat」提高 MyMemory 每日额度。'
+    )
+  }
+  if (lower.includes('timed out') || lower.includes('timeout')) {
+    return '连接翻译服务超时，请检查网络后重试。'
+  }
+  if (lower.includes('connection refused') || lower.includes('无法连接')) {
+    return '无法连接翻译服务，请先双击「启动翻译引擎.bat」并等到出现 [READY]。'
+  }
+  return msg || '翻译失败'
+}
 
 async function getLtBase() {
   try {
@@ -21,17 +95,18 @@ async function getLtBase() {
 
 async function ltFetch(path, body) {
   const base = await getLtBase()
+  const payload = { ...body, engineMode: userEngineMode }
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg =
       typeof data.error === 'string'
-        ? data.error
-        : `LibreTranslate 错误 (${res.status})`
+        ? friendlyTranslateError(data.error)
+        : `翻译引擎错误 (${res.status})`
     throw new Error(msg)
   }
   return data
@@ -74,30 +149,55 @@ export async function getHealth() {
     const codes = list.map((l) => l.code)
     const hasZh = codes.includes('zh')
 
-    let engineDetail = 'LibreTranslate'
+    let engineRaw = 'unknown'
+    let mode = userEngineMode
+    let localAvailable = false
+    let engineSync = false
+    let mymemoryEmailConfigured = false
     try {
       const healthRes = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) })
       if (healthRes.ok) {
         const h = await healthRes.json()
-        if (h.engine === 'mymemory-online') engineDetail = 'mymemory-online'
-        else if (h.engine === 'argostranslate-local') engineDetail = 'argostranslate-local'
+        engineRaw = h.engine ?? engineRaw
+        if (h.mode !== undefined) {
+          mode = h.mode
+          engineSync = true
+        }
+        if (h.localAvailable !== undefined) {
+          localAvailable = Boolean(h.localAvailable)
+        } else {
+          localAvailable =
+            String(engineRaw).includes('argostranslate') ||
+            (h.status === 'ok' && !String(engineRaw).includes('mymemory'))
+        }
+        if (h.mymemoryEmailConfigured !== undefined) {
+          mymemoryEmailConfigured = Boolean(h.mymemoryEmailConfigured)
+        }
       }
     } catch {
       /* ignore */
     }
 
+    if (!engineSync) {
+      mode = userEngineMode
+      engineRaw = resolveEngineForMode(userEngineMode, engineRaw, localAvailable)
+    }
+
     return {
       ok: true,
-      engine: engineDetail === 'mymemory-online' ? 'MyMemory (online)' : 'LibreTranslate',
+      engine: engineRaw,
+      mode,
+      localAvailable,
+      engineSync,
+      mymemoryEmailConfigured,
       url,
       languages: codes.length,
       enToZh: hasZh,
-      message:
-        engineDetail === 'mymemory-online'
-          ? '翻译就绪（多语言互译，在线）'
-          : hasZh
-            ? '翻译引擎就绪（多语言互译，英→中可离线）'
-            : '已连接，但可能未加载中文语言包',
+      message: engineSync
+        ? localAvailable
+          ? '翻译引擎就绪'
+          : '已连接（本地未安装，可切换在线模式或重启引擎安装语言包）'
+        : '翻译模式已保存；请重启「启动翻译引擎.bat」使切换完全生效',
     }
   } catch (e) {
     return {
@@ -136,6 +236,61 @@ export async function getLanguages() {
       { code: 'pt', name: 'Portuguese' },
       { code: 'it', name: 'Italian' },
     ],
+  }
+}
+
+export async function postEngineMode(body) {
+  const { mode } = body ?? {}
+  if (!mode || !['auto', 'local', 'online'].includes(mode)) {
+    return { status: 400, data: { error: '无效模式，请使用 auto、local 或 online' } }
+  }
+
+  saveStoredEngineMode(mode)
+
+  let engineRaw = 'mymemory-online'
+  let localAvailable = false
+  let mymemoryEmailConfigured = false
+  try {
+    const base = await getLtBase()
+    const res = await fetch(`${base}/engine/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+      signal: AbortSignal.timeout(120_000),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      return { status: 200, data: { ...data, engineSync: true } }
+    }
+    if (typeof data.error === 'string' && !data.error.includes('接口不存在')) {
+      return {
+        status: res.status,
+        data: { error: friendlyTranslateError(data.error) },
+      }
+    }
+    engineRaw = data.engine ?? engineRaw
+    localAvailable = Boolean(data.localAvailable)
+    if (data.mymemoryEmailConfigured !== undefined) {
+      mymemoryEmailConfigured = Boolean(data.mymemoryEmailConfigured)
+    }
+  } catch {
+    /* 旧版引擎无 /engine/mode，走本地保存 */
+  }
+
+  try {
+    const health = await getHealth()
+    engineRaw = health.engine ?? engineRaw
+    localAvailable = Boolean(health.localAvailable)
+    if (health.mymemoryEmailConfigured !== undefined) {
+      mymemoryEmailConfigured = Boolean(health.mymemoryEmailConfigured)
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return {
+    status: 200,
+    data: buildModePayload(engineRaw, localAvailable, false, mymemoryEmailConfigured),
   }
 }
 
@@ -201,6 +356,11 @@ export async function handleApiRequest(req, pathname) {
 
   if (req.method === 'GET' && pathname === '/api/languages') {
     return await getLanguages()
+  }
+
+  if (req.method === 'POST' && pathname === '/api/engine/mode') {
+    const body = await readJsonBody(req)
+    return await postEngineMode(body)
   }
 
   if (req.method === 'POST' && pathname === '/api/translate') {

@@ -1,8 +1,10 @@
 import cors from 'cors'
 import express from 'express'
 import {
+  friendlyTranslateError,
   getHealth,
   getLanguages,
+  postEngineMode,
   postTranslate,
   postTranslateBatch,
 } from './api-core.mjs'
@@ -26,12 +28,25 @@ app.get('/api/languages', async (_req, res) => {
   }
 })
 
+app.post('/api/engine/mode', async (req, res) => {
+  try {
+    const result = await postEngineMode(req.body)
+    res.status(result.status).json(result.data)
+  } catch (e) {
+    res.status(502).json({
+      error: friendlyTranslateError(e instanceof Error ? e.message : '切换翻译模式失败'),
+    })
+  }
+})
+
 app.post('/api/translate', async (req, res) => {
   try {
     const result = await postTranslate(req.body)
     res.status(result.status).json(result.data)
   } catch (e) {
-    res.status(502).json({ error: e instanceof Error ? e.message : '翻译失败' })
+    res.status(502).json({
+      error: friendlyTranslateError(e instanceof Error ? e.message : '翻译失败'),
+    })
   }
 })
 
@@ -40,7 +55,9 @@ app.post('/api/translate/batch', async (req, res) => {
     const result = await postTranslateBatch(req.body)
     res.status(result.status).json(result.data)
   } catch (e) {
-    res.status(502).json({ error: e instanceof Error ? e.message : '批量翻译失败' })
+    res.status(502).json({
+      error: friendlyTranslateError(e instanceof Error ? e.message : '批量翻译失败'),
+    })
   }
 })
 

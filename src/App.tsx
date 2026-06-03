@@ -20,10 +20,13 @@ import {
 import {
   checkEngineHealth,
   fetchLanguages,
-  translateAllSegments,
+  setEngineMode,
+  syncEngineModeOnLoad,
   translateSegment,
   type EngineHealth,
+  type EngineMode,
 } from './lib/translate'
+import { streamRevealText } from './lib/streamReveal'
 import type { Language } from './lib/languages'
 import type { ImportedDocument } from './types/document'
 
@@ -46,21 +49,54 @@ function App() {
   const [translating, setTranslating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [engine, setEngine] = useState<EngineHealth | null>(null)
+  const [modeSwitching, setModeSwitching] = useState(false)
   const [languages, setLanguages] = useState<Language[]>([])
   const [langFrom, setLangFrom] = useState(() => loadLangPair().from)
   const [langTo, setLangTo] = useState(() => loadLangPair().to)
   const [selectionTranslate, setSelectionTranslate] =
     useState<SelectionTranslateState | null>(null)
   const selectionReqRef = useRef(0)
+  const translateRunRef = useRef(0)
+  const [streamingTexts, setStreamingTexts] = useState<Record<string, string>>({})
+  const [pendingSegmentIds, setPendingSegmentIds] = useState<Set<string>>(() => new Set())
+  const [translateProgress, setTranslateProgress] = useState<{
+    current: number
+    total: number
+  } | null>(null)
+
+  const setSegmentPending = useCallback((segmentId: string, pending: boolean) => {
+    setPendingSegmentIds((prev) => {
+      const next = new Set(prev)
+      if (pending) next.add(segmentId)
+      else next.delete(segmentId)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
-    void checkEngineHealth().then(setEngine)
+    void syncEngineModeOnLoad()
+      .then(() => checkEngineHealth())
+      .then(setEngine)
     void fetchLanguages().then(setLanguages)
     const timer = setInterval(() => {
       void checkEngineHealth().then(setEngine)
     }, 30_000)
     return () => clearInterval(timer)
   }, [])
+
+  const handleEngineMode = async (mode: EngineMode) => {
+    if (engine?.mode === mode || modeSwitching) return
+    setModeSwitching(true)
+    setError(null)
+    try {
+      const health = await setEngineMode(mode)
+      setEngine(health)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '切换翻译模式失败')
+    } finally {
+      setModeSwitching(false)
+    }
+  }
 
   useEffect(() => {
     saveLangPair(langFrom, langTo)
@@ -115,15 +151,48 @@ function App() {
     [],
   )
 
+  const revealTranslation = useCallback(
+    async (
+      docId: string,
+      segmentId: string,
+      fullText: string,
+      runId: number,
+    ): Promise<void> => {
+      setStreamingTexts((prev) => ({ ...prev, [segmentId]: '' }))
+      await streamRevealText(fullText, (partial) => {
+        if (runId !== translateRunRef.current) return
+        setStreamingTexts((prev) => ({ ...prev, [segmentId]: partial }))
+      })
+      if (runId !== translateRunRef.current) return
+      updateDoc(docId, (doc) => ({
+        ...doc,
+        segments: doc.segments.map((s) =>
+          s.id === segmentId ? { ...s, translatedText: fullText } : s,
+        ),
+      }))
+      setStreamingTexts((prev) => {
+        const next = { ...prev }
+        delete next[segmentId]
+        return next
+      })
+    },
+    [updateDoc],
+  )
+
   const handleImport = async (files: FileList | null) => {
-    if (!files?.length) return
+    // 必须在首个 await 前拷贝：input 清空后 FileList 会失效
+    const fileList = Array.from(files ?? [])
+    if (fileList.length === 0) return
     setImporting(true)
     setError(null)
     try {
       const { importFile } = await import('./lib/parsers')
       const imported: ImportedDocument[] = []
-      for (const file of Array.from(files)) {
+      for (const file of fileList) {
         imported.push(await importFile(file))
+      }
+      if (imported.length === 0) {
+        throw new Error('未能导入任何文件')
       }
       setDocuments((prev) => [...imported, ...prev])
       setActiveId(imported[0].id)
@@ -138,6 +207,39 @@ function App() {
   const translateOptions = useMemo(
     () => ({ from: langFrom, to: langTo }),
     [langFrom, langTo],
+  )
+
+  const translateOneSegment = useCallback(
+    async (
+      docId: string,
+      segmentId: string,
+      sourceText: string,
+      runId: number,
+    ): Promise<void> => {
+      const trimmed = sourceText.trim()
+      if (!trimmed) {
+        updateDoc(docId, (doc) => ({
+          ...doc,
+          segments: doc.segments.map((s) =>
+            s.id === segmentId ? { ...s, translatedText: '' } : s,
+          ),
+        }))
+        return
+      }
+
+      setSegmentPending(segmentId, true)
+      try {
+        const full = await translateSegment(trimmed, translateOptions)
+        if (runId !== translateRunRef.current) return
+        setSegmentPending(segmentId, false)
+        await revealTranslation(docId, segmentId, full, runId)
+      } finally {
+        if (runId === translateRunRef.current) {
+          setSegmentPending(segmentId, false)
+        }
+      }
+    },
+    [revealTranslation, setSegmentPending, translateOptions, updateDoc],
   )
 
   const handleTextSelected = useCallback(
@@ -186,22 +288,26 @@ function App() {
 
   const handleTranslateAll = async () => {
     if (!activeDoc) return
+    const runId = ++translateRunRef.current
     setTranslating(true)
     setError(null)
+    setTranslateProgress({ current: 0, total: activeDoc.segments.length })
     try {
-      const texts = activeDoc.segments.map((s) => s.sourceText)
-      const results = await translateAllSegments(texts, translateOptions, () => {})
-      updateDoc(activeDoc.id, (doc) => ({
-        ...doc,
-        segments: doc.segments.map((s, i) => ({
-          ...s,
-          translatedText: results[i] ?? '',
-        })),
-      }))
+      const segments = activeDoc.segments
+      for (let i = 0; i < segments.length; i++) {
+        if (runId !== translateRunRef.current) return
+        const seg = segments[i]
+        setActiveSegmentId(seg.id)
+        setTranslateProgress({ current: i + 1, total: segments.length })
+        await translateOneSegment(activeDoc.id, seg.id, seg.sourceText, runId)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '翻译失败')
     } finally {
-      setTranslating(false)
+      if (runId === translateRunRef.current) {
+        setTranslating(false)
+        setTranslateProgress(null)
+      }
     }
   }
 
@@ -209,20 +315,18 @@ function App() {
     if (!activeDoc || !activeSegmentId) return
     const seg = activeDoc.segments.find((s) => s.id === activeSegmentId)
     if (!seg) return
+    const runId = ++translateRunRef.current
     setTranslating(true)
     setError(null)
+    setTranslateProgress(null)
     try {
-      const translated = await translateSegment(seg.sourceText, translateOptions)
-      updateDoc(activeDoc.id, (doc) => ({
-        ...doc,
-        segments: doc.segments.map((s) =>
-          s.id === activeSegmentId ? { ...s, translatedText: translated } : s,
-        ),
-      }))
+      await translateOneSegment(activeDoc.id, activeSegmentId, seg.sourceText, runId)
     } catch (e) {
       setError(e instanceof Error ? e.message : '翻译失败')
     } finally {
-      setTranslating(false)
+      if (runId === translateRunRef.current) {
+        setTranslating(false)
+      }
     }
   }
 
@@ -251,23 +355,80 @@ function App() {
           <h1 className="text-lg font-bold text-slate-900">文献译读</h1>
           <p className="text-xs text-slate-500">多语言文献 · 字段对照 · 全文可搜</p>
           {engine && (
-            <p
-              className={`mt-1 text-xs ${engine.ok ? 'text-emerald-600' : 'text-amber-600'}`}
-              title={engine.message}
-            >
-              {engine.ok
-                ? `开源引擎 ${engine.engine} · 已就绪`
-                : `翻译引擎未就绪：${engine.message}`}
-              {!engine.ok && (
-                <button
-                  type="button"
-                  className="ml-2 underline"
-                  onClick={() => void checkEngineHealth().then(setEngine)}
-                >
-                  重新检测
-                </button>
+            <div className="mt-1">
+              <p
+                className={`text-xs ${engine.ok ? 'text-emerald-600' : 'text-amber-600'}`}
+                title={engine.message}
+              >
+                {engine.ok
+                  ? `${engine.engine} · 已就绪`
+                  : `翻译引擎未就绪：${engine.message}`}
+                {!engine.ok && (
+                  <button
+                    type="button"
+                    className="ml-2 underline"
+                    onClick={() => void checkEngineHealth().then(setEngine)}
+                  >
+                    重新检测
+                  </button>
+                )}
+              </p>
+              {engine.ok && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-slate-500">翻译模式</span>
+                  <div
+                    className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+                    role="group"
+                    aria-label="翻译模式"
+                  >
+                    {(
+                      [
+                        ['auto', '自动'],
+                        ['local', '本地'],
+                        ['online', '在线'],
+                      ] as const
+                    ).map(([mode, label]) => {
+                      const active = (engine.mode ?? 'auto') === mode
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          disabled={modeSwitching}
+                          title={
+                            mode === 'local'
+                              ? '离线英→中，不限流（其他语言对请用在线/自动）'
+                              : mode === 'online'
+                                ? 'MyMemory 在线，有频率与每日额度限制'
+                                : '优先本地，不可用时自动走在线'
+                          }
+                          onClick={() => void handleEngineMode(mode)}
+                          className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                            active
+                              ? 'bg-white text-blue-700 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {modeSwitching && (
+                    <span className="text-xs text-slate-400">切换中…</span>
+                  )}
+                </div>
               )}
-            </p>
+              {engine.ok && engine.mode === 'local' && (langFrom !== 'en' || langTo !== 'zh') && (
+                <p className="mt-1 text-xs text-amber-600">
+                  本地模式仅支持英→中；当前为 {languageLabel(langFrom)}→{languageLabel(langTo)}，请改语言或切换「在线」
+                </p>
+              )}
+              {engine.ok && engine.engineSync === false && (
+                <p className="mt-1 text-xs text-amber-600">
+                  请重启「启动翻译引擎.bat」并刷新页面，切换才会作用于翻译
+                </p>
+              )}
+            </div>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -296,8 +457,10 @@ function App() {
               multiple
               accept={ACCEPT_IMPORT}
               onChange={(e) => {
-                void handleImport(e.target.files)
-                e.target.value = ''
+                const input = e.target
+                void handleImport(input.files).finally(() => {
+                  input.value = ''
+                })
               }}
             />
           </label>
@@ -307,7 +470,11 @@ function App() {
             onClick={() => void handleTranslateAll()}
             className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
           >
-            {translating ? '翻译中…' : '翻译全文'}
+            {translating
+              ? translateProgress
+                ? `翻译中 ${translateProgress.current}/${translateProgress.total}…`
+                : '翻译中…'
+              : '翻译全文'}
           </button>
           <button
             type="button"
@@ -371,6 +538,8 @@ function App() {
                 activeSegmentId={activeSegmentId}
                 searchQuery={query}
                 searchHighlights={searchHighlights}
+                streamingTexts={streamingTexts}
+                pendingSegmentIds={pendingSegmentIds}
                 onSegmentActivate={setActiveSegmentId}
                 onTranslationEdit={(id, text) => {
                   updateDoc(activeDoc.id, (doc) => ({

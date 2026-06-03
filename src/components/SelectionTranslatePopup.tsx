@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { streamRevealText } from '../lib/streamReveal'
+import { StreamingText } from './StreamingText'
+import { ThinkingIndicator } from './ThinkingIndicator'
 
 interface SelectionTranslatePopupProps {
   sourceText: string
@@ -20,6 +23,9 @@ export function SelectionTranslatePopup({
 }: SelectionTranslatePopupProps) {
   const popupRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
+  const [displayed, setDisplayed] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  const streamGenRef = useRef(0)
 
   useLayoutEffect(() => {
     const el = popupRef.current
@@ -33,7 +39,7 @@ export function SelectionTranslatePopup({
       top = Math.max(margin, anchor.top - height - margin)
     }
     setPos({ top, left })
-  }, [anchor, sourceText, translation, loading, error])
+  }, [anchor, sourceText, translation, loading, error, displayed, streaming])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -50,6 +56,35 @@ export function SelectionTranslatePopup({
       window.removeEventListener('mousedown', onMouseDown)
     }
   }, [onClose])
+
+  useEffect(() => {
+    if (loading || error) {
+      setDisplayed('')
+      setStreaming(false)
+      return
+    }
+    if (!translation) {
+      setDisplayed('')
+      setStreaming(false)
+      return
+    }
+
+    const gen = ++streamGenRef.current
+    setDisplayed('')
+    setStreaming(true)
+
+    void streamRevealText(translation, (partial) => {
+      if (gen !== streamGenRef.current) return
+      setDisplayed(partial)
+    }).then(() => {
+      if (gen !== streamGenRef.current) return
+      setStreaming(false)
+    })
+
+    return () => {
+      streamGenRef.current += 1
+    }
+  }, [translation, loading, error])
 
   return createPortal(
     <div
@@ -74,11 +109,13 @@ export function SelectionTranslatePopup({
       </div>
       <p className="mb-2 line-clamp-3 text-xs leading-relaxed text-slate-500">{sourceText}</p>
       {loading ? (
-        <p className="text-sm text-slate-400">翻译中…</p>
+        <ThinkingIndicator label="正在理解并翻译…" />
       ) : error ? (
         <p className="text-sm text-red-600">{error}</p>
       ) : (
-        <p className="text-sm leading-relaxed text-slate-900">{translation}</p>
+        <p className="text-sm leading-relaxed text-slate-900">
+          <StreamingText text={displayed || translation} streaming={streaming} />
+        </p>
       )}
     </div>,
     document.body,

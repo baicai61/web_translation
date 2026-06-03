@@ -3,6 +3,8 @@ import { findSegmentByDom } from '../lib/search'
 import type { SegmentHighlights } from '../lib/highlight'
 import type { TextSegment } from '../types/document'
 import { HighlightedText } from './HighlightedText'
+import { StreamingText } from './StreamingText'
+import { ThinkingIndicator } from './ThinkingIndicator'
 
 interface SegmentPaneProps {
   title: string
@@ -15,6 +17,10 @@ interface SegmentPaneProps {
   onTranslationEdit?: (id: string, text: string) => void
   onTextSelected?: (text: string, rect: DOMRect) => void
   selectionTranslateEnabled?: boolean
+  /** 逐字展示中的译文片段（覆盖 translatedText） */
+  streamingTexts?: Record<string, string>
+  /** 正在等待 API 的字段 */
+  pendingSegmentIds?: Set<string>
 }
 
 function kindLabel(kind: TextSegment['kind'], meta?: TextSegment['meta']): string {
@@ -45,6 +51,8 @@ export function SegmentPane({
   onTranslationEdit,
   onTextSelected,
   selectionTranslateEnabled,
+  streamingTexts,
+  pendingSegmentIds,
 }: SegmentPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeRef = useRef<HTMLDivElement>(null)
@@ -66,7 +74,7 @@ export function SegmentPane({
         <p className="mt-0.5 text-xs text-slate-500">
           {mode === 'source'
             ? '框选词语自动翻译 · 点击字段同步右侧'
-            : '与左侧同编号字段一一对应'}
+            : '译文逐字呈现 · 与左侧同编号字段一一对应'}
         </p>
       </div>
       <div
@@ -117,7 +125,14 @@ export function SegmentPane({
       >
         {segments.map((seg) => {
           const isActive = seg.id === activeSegmentId
-          const text = mode === 'source' ? seg.sourceText : seg.translatedText
+          const baseText = mode === 'source' ? seg.sourceText : seg.translatedText
+          const streamPartial = streamingTexts?.[seg.id]
+          const isPending = pendingSegmentIds?.has(seg.id)
+          const isStreaming = streamPartial !== undefined
+          const text =
+            mode === 'translation' && streamPartial !== undefined
+              ? streamPartial
+              : baseText
           const hl = searchHighlights?.get(seg.id)
           const highlightRanges =
             mode === 'source' ? hl?.source : hl?.translation
@@ -132,7 +147,7 @@ export function SegmentPane({
               key={seg.id}
               ref={isActive ? activeRef : undefined}
               data-segment-id={seg.id}
-              className={`segment-block mb-2 cursor-pointer rounded-lg px-3 py-2.5 ${isActive ? 'is-active' : ''}`}
+              className={`segment-block mb-2 cursor-pointer rounded-lg px-3 py-2.5 ${isActive ? 'is-active' : ''} ${isStreaming || isPending ? 'is-streaming' : ''}`}
               onClick={() => onSegmentActivate(seg.id)}
               role="button"
               tabIndex={0}
@@ -152,7 +167,15 @@ export function SegmentPane({
                 </span>
               </div>
               {mode === 'translation' && onTranslationEdit ? (
-                showTranslationHighlight ? (
+                isPending ? (
+                  <div className="py-1">
+                    <ThinkingIndicator label="正在翻译此段…" />
+                  </div>
+                ) : isStreaming ? (
+                  <p className="text-sm leading-relaxed text-slate-800">
+                    <StreamingText text={text} streaming />
+                  </p>
+                ) : showTranslationHighlight ? (
                   <div
                     className="w-full rounded border border-transparent bg-transparent text-sm leading-relaxed text-slate-800"
                     onDoubleClick={(e) => {

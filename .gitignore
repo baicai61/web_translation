@@ -25,3 +25,9 @@ __pycache__
 *.njsproj
 *.sln
 *.sw?
+server/.engine-mode.json
+server/.mymemory-email
+.mymemory-email
+# Local Argos models (run scripts/install_local_translate.py to download)
+models/argos/*
+!models/argos/.gitkeep

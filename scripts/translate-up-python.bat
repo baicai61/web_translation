@@ -2,7 +2,7 @@
 cd /d "%~dp0.."
 
 echo ========================================
-echo  Translation Engine (English - Chinese)
+echo  Local Translation Engine (CTranslate2)
 echo ========================================
 echo.
 
@@ -22,7 +22,8 @@ if not defined PY_EXE (
 )
 
 if not defined PY_EXE (
-  echo ERROR: Need Python 3.10, 3.11 or 3.12
+  echo ERROR: Python 3.10 / 3.11 / 3.12 required
+  echo Download: https://www.python.org/downloads/
   pause
   exit /b 1
 )
@@ -31,12 +32,25 @@ echo Using: %PY_EXE%
 %PY_EXE% -c "import sys; print(sys.version)"
 echo.
 
-echo Optional: try install local Argos (may fail on some PCs - OK)
-%PY_EXE% -m pip install argostranslate==1.9.6 --no-cache-dir -q 2>nul
+echo [1/2] Install CTranslate2 en-zh pack (~80MB, first run only)...
+echo NOTE: Close any OLD engine window on port 5000 before starting.
+echo.
+%PY_EXE% scripts\install_local_translate.py
+if errorlevel 1 (
+  echo.
+  echo WARN: Local pack not fully installed; online fallback may be used.
+  echo Docker option: run translate-up-docker.bat
+  echo.
+)
 
-echo Starting http://127.0.0.1:5000
-echo If local Argos fails, online fallback will be used automatically.
-echo Wait for [READY], then press F5 on the web page.
+echo [2/2] Start server http://127.0.0.1:5000
+echo Stopping old processes on port 5000...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr "127.0.0.1:5000" ^| findstr LISTENING') do (
+  taskkill /F /PID %%a >nul 2>&1
+)
+echo Wait for [READY], then set web mode to LOCAL and press F5.
+echo Local mode: English -^> Chinese only.
+echo DO NOT CLOSE this window.
 echo.
 %PY_EXE% scripts\lt_server.py
 pause
