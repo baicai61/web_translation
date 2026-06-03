@@ -32,7 +32,7 @@ echo Using: %PY_EXE%
 %PY_EXE% -c "import sys; print(sys.version)"
 echo.
 
-echo [1/2] Install CTranslate2 en-zh pack (~80MB, first run only)...
+echo [1/2] Check local models (first run downloads ~140MB, then seconds only)...
 echo NOTE: Close any OLD engine window on port 5000 before starting.
 echo.
 %PY_EXE% scripts\install_local_translate.py
@@ -49,7 +49,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr "127.0.0.1:5000" ^| findstr L
   taskkill /F /PID %%a >nul 2>&1
 )
 echo Wait for [READY], then set web mode to LOCAL and press F5.
-echo Local mode: English -^> Chinese only.
+echo Local mode: English ^<-^> Chinese offline.
 echo DO NOT CLOSE this window.
 echo.
 %PY_EXE% scripts\lt_server.py

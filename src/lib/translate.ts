@@ -67,7 +67,7 @@ function buildHealthMessage(
   }
   if (m === 'local') {
     return localAvailable
-      ? '当前：本地离线（仅英→中；其他语言请用在线/自动）'
+      ? '当前：本地离线（中英互译；其他语言请用在线/自动）'
       : '本地引擎未就绪，请重启「启动翻译引擎.bat」'
   }
   if (m === 'online') {

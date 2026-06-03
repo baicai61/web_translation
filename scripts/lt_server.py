@@ -119,7 +119,7 @@ def _friendly_error(exc: Exception) -> str:
         return (
             hint
             + "今日在线免费翻译额度已用尽，请明天再试，"
-            "或双击「启动翻译引擎.bat」安装本地离线翻译（英→中不受此限制）。"
+            "或双击「启动翻译引擎.bat」安装本地离线翻译（中英互译不受此限制）。"
         )
     if any(k in lower for k in ("timed out", "timeout")):
         return "连接翻译服务超时，请检查网络后重试。"
@@ -230,16 +230,30 @@ def _try_local_engine():
 
     def translate_fn(text: str, source: str = "en", target: str = "zh") -> str:
         src, tgt = _normalize_lang(source), _normalize_lang(target)
-        if src == "en" and tgt == "zh":
-            return ct2_engine.translate_en_zh(text)
-        raise RuntimeError(f"本地引擎暂不支持 {src} -> {tgt}，目前仅支持英→中")
+        if not ct2_engine.model_present(src, tgt):
+            supported = _format_local_pairs()
+            raise RuntimeError(
+                f"本地引擎暂不支持 {src} -> {tgt}。"
+                f"当前已安装：{supported or '无'}；其他语言对请用在线/自动模式。"
+            )
+        return ct2_engine.translate(text, src, tgt)
 
     return translate_fn
 
 
+def _format_local_pairs() -> str:
+    pairs = sorted(ct2_engine.available_pairs())
+    labels = []
+    for src, tgt in pairs:
+        labels.append(f"{src}→{tgt}")
+    return "、".join(labels)
+
+
 def _local_has_pair(source: str, target: str) -> bool:
     src, tgt = _normalize_lang(source), _normalize_lang(target)
-    return (src, tgt) in _local_pairs or (src == "en" and tgt == "zh" and _local_available)
+    return (src, tgt) in _local_pairs or (
+        _local_available and ct2_engine.model_present(src, tgt)
+    )
 
 
 def _local_mode_error(source: str, target: str) -> RuntimeError:
@@ -249,10 +263,11 @@ def _local_mode_error(source: str, target: str) -> RuntimeError:
             "（或重新双击 启动翻译引擎.bat），也可切换「在线」模式。"
         )
     src, tgt = _normalize_lang(source), _normalize_lang(target)
-    if src != "en" or tgt != "zh":
+    if not _local_has_pair(src, tgt):
+        supported = _format_local_pairs()
         return RuntimeError(
-            f"本地模式目前仅支持英→中，当前为 {src}→{tgt}。"
-            "请把语言改为英→中，或切换「在线」/「自动」模式。"
+            f"本地模式暂不支持 {src}→{tgt}。"
+            f"已安装：{supported or '无'}；请切换语言或改用「在线」/「自动」模式。"
         )
     return RuntimeError("本地引擎异常，请重启「启动翻译引擎.bat」。")
 
@@ -325,7 +340,7 @@ def set_engine_mode(mode: str) -> dict:
         try:
             _local_fn = _try_local_engine()
             _local_available = True
-            _local_pairs.add(("en", "zh"))
+            _local_pairs.update(ct2_engine.available_pairs())
             print("[engine] Local CTranslate2 loaded on demand", flush=True)
         except Exception as e:
             raise RuntimeError(
@@ -346,8 +361,8 @@ def init_engine():
     try:
         _local_fn = _try_local_engine()
         _local_available = True
-        _local_pairs.add(("en", "zh"))
-        print("[engine] Local engine OK (en->zh offline)", flush=True)
+        _local_pairs.update(ct2_engine.available_pairs())
+        print(f"[engine] Local engine OK ({_format_local_pairs() or 'no pairs'})", flush=True)
     except Exception as e:
         _local_fn = None
         _local_available = False

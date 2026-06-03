@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DocumentSidebar } from './components/DocumentSidebar'
 import { LanguageSelector } from './components/LanguageSelector'
+import { NotebookPanel } from './components/NotebookPanel'
 import { SearchBar } from './components/SearchBar'
 import { SegmentPane } from './components/SegmentPane'
 import { SelectionTranslatePopup } from './components/SelectionTranslatePopup'
@@ -13,9 +14,11 @@ import {
   loadActiveId,
   loadLangPair,
   loadLibrary,
+  loadNotebook,
   saveActiveId,
   saveLangPair,
   saveLibrary,
+  saveNotebook,
 } from './lib/storage'
 import {
   checkEngineHealth,
@@ -29,6 +32,9 @@ import {
 import { streamRevealText } from './lib/streamReveal'
 import type { Language } from './lib/languages'
 import type { ImportedDocument } from './types/document'
+import type { NotebookEntry } from './types/notebook'
+
+type AppView = 'reader' | 'notebook'
 
 interface SelectionTranslateState {
   text: string
@@ -63,6 +69,9 @@ function App() {
     current: number
     total: number
   } | null>(null)
+  const [view, setView] = useState<AppView>('reader')
+  const [notebook, setNotebook] = useState<NotebookEntry[]>(() => loadNotebook())
+  const [notebookJustAdded, setNotebookJustAdded] = useState(false)
 
   const setSegmentPending = useCallback((segmentId: string, pending: boolean) => {
     setPendingSegmentIds((prev) => {
@@ -114,6 +123,14 @@ function App() {
   useEffect(() => {
     saveActiveId(activeId)
   }, [activeId])
+
+  useEffect(() => {
+    saveNotebook(notebook)
+  }, [notebook])
+
+  useEffect(() => {
+    setNotebookJustAdded(false)
+  }, [selectionTranslate?.text, selectionTranslate?.translation])
 
   useEffect(() => {
     if (documents.length === 0) {
@@ -286,6 +303,29 @@ function App() {
     [engine?.ok, translateOptions],
   )
 
+  const handleAddToNotebook = useCallback(() => {
+    if (!selectionTranslate?.translation || selectionTranslate.loading) return
+    const entry: NotebookEntry = {
+      id: crypto.randomUUID(),
+      sourceText: selectionTranslate.text,
+      translation: selectionTranslate.translation,
+      createdAt: Date.now(),
+      documentName: activeDoc?.fileName,
+      langFrom,
+      langTo,
+    }
+    setNotebook((prev) => [entry, ...prev])
+    setNotebookJustAdded(true)
+  }, [selectionTranslate, activeDoc?.fileName, langFrom, langTo])
+
+  const handleRemoveNotebookEntry = useCallback((id: string) => {
+    setNotebook((prev) => prev.filter((e) => e.id !== id))
+  }, [])
+
+  const handleClearNotebook = useCallback(() => {
+    setNotebook([])
+  }, [])
+
   const handleTranslateAll = async () => {
     if (!activeDoc) return
     const runId = ++translateRunRef.current
@@ -396,7 +436,7 @@ function App() {
                           disabled={modeSwitching}
                           title={
                             mode === 'local'
-                              ? '离线英→中，不限流（其他语言对请用在线/自动）'
+                              ? '离线中英互译，不限流（其他语言对请用在线/自动）'
                               : mode === 'online'
                                 ? 'MyMemory 在线，有频率与每日额度限制'
                                 : '优先本地，不可用时自动走在线'
@@ -418,9 +458,14 @@ function App() {
                   )}
                 </div>
               )}
-              {engine.ok && engine.mode === 'local' && (langFrom !== 'en' || langTo !== 'zh') && (
+              {engine.ok &&
+                engine.mode === 'local' &&
+                !(
+                  (langFrom === 'en' && langTo === 'zh') ||
+                  (langFrom === 'zh' && langTo === 'en')
+                ) && (
                 <p className="mt-1 text-xs text-amber-600">
-                  本地模式仅支持英→中；当前为 {languageLabel(langFrom)}→{languageLabel(langTo)}，请改语言或切换「在线」
+                  本地模式支持中↔英；当前为 {languageLabel(langFrom)}→{languageLabel(langTo)}，请改语言或切换「在线」
                 </p>
               )}
               {engine.ok && engine.engineSync === false && (
@@ -495,7 +540,11 @@ function App() {
         <DocumentSidebar
           documents={documents}
           activeId={activeId}
+          notebookCount={notebook.length}
+          view={view}
+          onViewChange={setView}
           onSelect={(id) => {
+            setView('reader')
             setActiveId(id)
             const doc = documents.find((d) => d.id === id)
             setActiveSegmentId(doc?.segments[0]?.id ?? null)
@@ -506,6 +555,14 @@ function App() {
         />
 
         <main className="flex min-w-0 flex-1 flex-col">
+          {view === 'notebook' ? (
+            <NotebookPanel
+              entries={notebook}
+              onRemove={handleRemoveNotebookEntry}
+              onClear={handleClearNotebook}
+            />
+          ) : (
+            <>
           <SearchBar
             query={query}
             scope={scope}
@@ -559,6 +616,8 @@ function App() {
               </p>
             </div>
           )}
+            </>
+          )}
         </main>
       </div>
 
@@ -572,7 +631,10 @@ function App() {
           onClose={() => {
             selectionReqRef.current += 1
             setSelectionTranslate(null)
+            setNotebookJustAdded(false)
           }}
+          onAddToNotebook={handleAddToNotebook}
+          addedToNotebook={notebookJustAdded}
         />
       )}
     </div>

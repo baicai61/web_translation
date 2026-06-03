@@ -1,4 +1,5 @@
 import type { ImportedDocument } from '../types/document'
+import type { NotebookEntry } from '../types/notebook'
 
 const LIBRARY_KEY = 'fanyi-student-library'
 const ACTIVE_KEY = 'fanyi-student-active-id'
@@ -67,4 +68,28 @@ export function loadEngineMode(): EngineMode {
 
 export function saveEngineMode(mode: EngineMode): void {
   localStorage.setItem(ENGINE_MODE_KEY, mode)
+}
+
+const NOTEBOOK_KEY = 'fanyi-notebook'
+
+export function loadNotebook(): NotebookEntry[] {
+  try {
+    const raw = localStorage.getItem(NOTEBOOK_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as NotebookEntry[]
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (e) =>
+        e &&
+        typeof e.id === 'string' &&
+        typeof e.sourceText === 'string' &&
+        typeof e.translation === 'string',
+    )
+  } catch {
+    return []
+  }
+}
+
+export function saveNotebook(entries: NotebookEntry[]): void {
+  localStorage.setItem(NOTEBOOK_KEY, JSON.stringify(entries))
 }

@@ -11,6 +11,8 @@ interface SelectionTranslatePopupProps {
   error: string | null
   anchor: DOMRect
   onClose: () => void
+  onAddToNotebook?: () => void
+  addedToNotebook?: boolean
 }
 
 export function SelectionTranslatePopup({
@@ -20,6 +22,8 @@ export function SelectionTranslatePopup({
   error,
   anchor,
   onClose,
+  onAddToNotebook,
+  addedToNotebook,
 }: SelectionTranslatePopupProps) {
   const popupRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
@@ -98,14 +102,33 @@ export function SelectionTranslatePopup({
         <p className="text-[10px] font-medium uppercase tracking-wide text-blue-600">
           划词翻译
         </p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          aria-label="关闭"
-        >
-          ✕
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {onAddToNotebook && (
+            <button
+              type="button"
+              disabled={loading || !!error || !translation || addedToNotebook}
+              onClick={onAddToNotebook}
+              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
+              title={
+                addedToNotebook
+                  ? '已在笔记本中'
+                  : loading
+                    ? '翻译完成后可添加'
+                    : '保存到笔记本'
+              }
+            >
+              {addedToNotebook ? '已添加' : '添加到笔记本'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            aria-label="关闭"
+          >
+            ✕
+          </button>
+        </div>
       </div>
       <p className="mb-2 line-clamp-3 text-xs leading-relaxed text-slate-500">{sourceText}</p>
       {loading ? (
